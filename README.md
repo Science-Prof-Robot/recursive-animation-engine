@@ -76,6 +76,7 @@ Or from source:
 ```bash
 git clone https://github.com/Science-Prof-Robot/recursive-animation-engine
 cd recursive-animation-engine
+npm install   # Node 22+ — installs Hyperframes CLI into node_modules/.bin
 pip install -e .
 ```
 
@@ -83,11 +84,11 @@ pip install -e .
 
 | Tool | Install |
 |------|---------|
-| [`bun`](https://bun.sh) | `curl -fsSL https://bun.sh/install \| bash` |
+| **Node.js** | **22+** (required for the bundled Hyperframes npm package). Use `nvm`, `fnm`, or your OS package manager. |
+| **Hyperframes CLI** | **Preferred:** from the repo root run **`npm install`** once — this installs the official [`hyperframes`](https://www.npmjs.com/package/hyperframes) CLI next to the project (no separate clone). `reng` resolves `node_modules/.bin/hyperframes` automatically. **Legacy:** build the [Hyperframes monorepo](https://github.com/heygen-com/hyperframes) with Bun and set `HYPERFRAMES_CLI` to `packages/cli/dist/cli.js`. |
 | `ffmpeg` | `apt-get install ffmpeg` / `brew install ffmpeg` |
-| `chromium` | `apt-get install chromium` (set `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`) |
-| `node` | `apt-get install nodejs` / use nvm |
-| [Hyperframes](https://github.com/heygen-com/hyperframes) | `git clone` → `bun install` → `bun run build` |
+| `chromium` | Used by Hyperframes for headless capture; install Chromium/Chrome and set `PUPPETEER_EXECUTABLE_PATH` if it is not discovered automatically. |
+| [`bun`](https://bun.sh) | Optional — only if you develop against a cloned Hyperframes monorepo instead of `npm install`. |
 
 ### Environment variables
 
@@ -100,10 +101,20 @@ pip install -e .
 | `RENG_VISION_PROVIDER` | no | `openrouter` | Provider for vision tasks |
 | `RENG_TEXT_PROVIDER` | no | `native` | Text generation provider (`native` = Claude Code context) |
 | `RENG_VISION_MODEL` | no | `google/gemma-3-27b-it` | Vision model ID |
-| `HYPERFRAMES_CLI` | no | `~/hyperframes/...` | Path to Hyperframes CLI |
+| `HYPERFRAMES_CLI` | no | *(auto)* | Override: path to `hyperframes` binary, or legacy `cli.js` for `node … render` |
 | `RENG_EVENT_LOG` | no | `~/.recursive-animation-engine/events.jsonl` | Event log path |
 
 *At least one provider key is required depending on your setup.
+
+### Verify Hyperframes and tests
+
+After `npm install` at the repo root:
+
+```bash
+npm test
+```
+
+This runs `hyperframes --version`, checks that `ffmpeg` is on your `PATH`, and executes the stdlib `unittest` suite (CLI resolution + smoke checks). A full headless render check is opt-in: `RUN_HYPERFRAMES_RENDER=1 npm test`.
 
 ## Usage
 

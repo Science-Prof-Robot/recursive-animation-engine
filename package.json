@@ -1,0 +1,15 @@
+{
+  "name": "recursive-animation-engine-tooling",
+  "private": true,
+  "description": "Installs the Hyperframes CLI next to this repo so `reng` can render without a manual clone.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "postinstall": "hyperframes --version",
+    "test": "hyperframes --version && (command -v ffmpeg >/dev/null 2>&1 || (echo 'ffmpeg not on PATH' >&2; exit 1)) && python3 -m unittest discover -s tests -p 'test_*.py' -v"
+  },
+  "dependencies": {
+    "hyperframes": "0.4.12"
+  }
+}

@@ -13,3 +13,6 @@ build/
 # Local tooling venvs (must never be bundled into sdists)
 .venv-build/
 .venv/
+
+# Node / Hyperframes (npm install at repo root)
+node_modules/

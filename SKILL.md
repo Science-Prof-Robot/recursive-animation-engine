@@ -12,7 +12,7 @@ A comprehensive pipeline that renders HTML compositions to MP4 and uses vision m
 ### Basic Loop (legacy)
 ```
 1. you write HTML/CSS/JS
-2. engine renders it to MP4                       (chromium + bun + ffmpeg)
+2. engine renders it to MP4                       (Hyperframes CLI via `npm install` + Chromium + ffmpeg)
 3. engine extracts 3 keyframes from the MP4       (ffmpeg)
 4. engine asks a vision model: "is this correct?" (Gemma via OpenRouter/Gemini/Fireworks)
 5. if any frame fails → you patch the HTML → loop back to step 2
@@ -29,6 +29,10 @@ A comprehensive pipeline that renders HTML compositions to MP4 and uses vision m
 ```
 
 All progress is streamed to `~/.recursive-animation-engine/events.jsonl` — run `reng watch` in a separate terminal to see what's happening in real time.
+
+### One-step Hyperframes (Node 22+)
+
+From the **recursive-animation-engine** repo root, run **`npm install`** once. That installs the official Hyperframes CLI into `node_modules/.bin`; `reng` picks it up automatically (no `~/hyperframes` clone). Override with `HYPERFRAMES_CLI` only if you use a custom binary or legacy `cli.js`.
 
 ## Using it from an agent
 
@@ -276,7 +280,7 @@ The engine writes:
 | `RENG_TEXT_PROVIDER` | no | `native` | Text generation provider (native uses Claude Code context) |
 | `RENG_VISION_MODEL` | no | `google/gemma-3-27b-it` | Vision model (Gemma series recommended) |
 | `RENG_TEXT_MODEL` | no | `claude-code-native` | Text model (or fallback to Gemma) |
-| `HYPERFRAMES_CLI` | no | `~/hyperframes/packages/cli/dist/cli.js` | Path to built Hyperframes CLI |
+| `HYPERFRAMES_CLI` | no | *(auto: `node_modules/.bin/hyperframes`)* | Override: `hyperframes` binary or legacy `cli.js` |
 | `RENG_EVENT_LOG` | no | `~/.recursive-animation-engine/events.jsonl` | Event log path |
 
 *At least one provider key is required depending on which providers you use.
@@ -304,7 +308,7 @@ The engine writes:
 If `reng render` or `reng build` fails with "not found" or a path error after **2 different attempts**:
 
 1. **STOP** the fix loop.
-2. Run `which reng ffmpeg node chromium bun` and `ls $HYPERFRAMES_CLI` to gather evidence.
+2. Run `which reng ffmpeg node chromium`, `npm install` at the engine repo root if needed, and `ls node_modules/.bin/hyperframes` (or `ls $HYPERFRAMES_CLI`) to gather evidence.
 3. **Report to the user** with the exact command, the exact error, and the file paths you can see.
 4. Do not silently retry — a broken shell is not a coding bug.
 
