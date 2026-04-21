@@ -59,6 +59,14 @@ reng watch — tailing ~/.recursive-animation-engine/events.jsonl
 
 ## Install
 
+From [PyPI](https://pypi.org/project/recursive-animation-engine/) (recommended):
+
+```bash
+pip install recursive-animation-engine
+```
+
+Latest from GitHub (if you need unreleased changes):
+
 ```bash
 pip install git+https://github.com/Science-Prof-Robot/recursive-animation-engine
 ```

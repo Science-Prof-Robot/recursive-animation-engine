@@ -4,3 +4,12 @@ __pycache__/
 .DS_Store
 *.mp4
 *_frame*.png
+
+# Python packaging artifacts (keep repo clean; publish via `python -m build`)
+dist/
+build/
+*.egg-info/
+
+# Local tooling venvs (must never be bundled into sdists)
+.venv-build/
+.venv/

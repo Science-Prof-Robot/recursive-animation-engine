@@ -28,7 +28,10 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/Science-Prof-Robot/recursive-animation-engine"
+Documentation = "https://github.com/Science-Prof-Robot/recursive-animation-engine#readme"
+Repository = "https://github.com/Science-Prof-Robot/recursive-animation-engine"
 Issues = "https://github.com/Science-Prof-Robot/recursive-animation-engine/issues"
+Changelog = "https://github.com/Science-Prof-Robot/recursive-animation-engine/releases"
 
 [project.scripts]
 reng = "reng.__main__:main"
