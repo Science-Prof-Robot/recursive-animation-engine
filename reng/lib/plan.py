@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 
 from .providers import (
     ProviderError,
-    get_text_model_spec,
     get_text_provider,
     get_vision_model_spec,
     get_vision_provider,
@@ -202,6 +201,118 @@ def get_planning_questions() -> list[dict]:
     return PLANNING_QUESTIONS.copy()
 
 
+def _parse_json_object_from_llm(text: str) -> dict:
+    """Strip common markdown fences and parse a single JSON object."""
+    raw = text.strip()
+    if "```json" in raw:
+        raw = raw.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in raw:
+        raw = raw.split("```", 1)[1].split("```", 1)[0].strip()
+    return json.loads(raw)
+
+
+def gather_answers_via_llm(
+    user_brief: str,
+    *,
+    questions: list[dict],
+    provider_name: str | None = None,
+    quick: bool = False,
+) -> dict[str, str]:
+    """
+    Map a free-form user brief to structured planning answers using a text LLM.
+
+    Used by ``reng plan --llm`` so OpenRouter/Gemini/Fireworks can conduct the
+    "interview" in one shot instead of many stdin prompts.
+
+    Args:
+        user_brief: What the user wants the video to be about.
+        questions: Subset of planning questions to fill (caller filters ``--quick``).
+        provider_name: Optional CLI override (same values as ``reason_over_acts``).
+        quick: Reserved for parity with CLI; filtering is done by the caller.
+
+    Returns:
+        Dict mapping each question ``id`` to a non-empty string (``N/A`` for unknown optionals).
+    """
+    _ = quick  # Filtering happens in the CLI via ``to_ask``; kept for API stability.
+
+    from .providers import (
+        NativeClaudeProvider,
+        effective_text_model_spec,
+        get_provider,
+        get_text_provider,
+    )
+
+    provider = get_text_provider()
+    if provider_name:
+        provider = get_provider(provider_name)
+    if isinstance(provider, NativeClaudeProvider):
+        raise PlanError(
+            "LLM planning Q&A needs a remote text provider. Examples:\n"
+            "  export RENG_TEXT_PROVIDER=openrouter\n"
+            "  export OPENROUTER_API_KEY=...\n"
+            "Or: reng plan --llm --provider openrouter\n"
+            "(Native text mode has no HTTP API to run the Q&A step.)"
+        )
+
+    model_spec = effective_text_model_spec(provider)
+
+    catalog = [
+        {"id": q["id"], "question": q["question"], "required": q.get("required", False)}
+        for q in questions
+    ]
+    ids = [q["id"] for q in questions]
+
+    prompt = f"""You help produce structured answers for a motion-graphics / explainer video plan.
+
+The user wrote this brief (informal language is OK):
+\"\"\"
+{user_brief}
+\"\"\"
+
+Answer EVERY question in the catalog. Prefer facts from the brief; infer sensible
+defaults only where needed. Optional questions must still get a short string
+(use \"N/A\" if truly unknown).
+
+Catalog:
+{json.dumps(catalog, indent=2)}
+
+Return ONLY valid JSON with this exact top-level shape:
+{{\"answers\": {{\"<id>\": \"<string>\", ...}}}}
+
+Rules:
+- Every catalog \"id\" must appear exactly once as a key under \"answers\".
+- Values are plain strings (no nested objects).
+- No markdown, no text before or after the JSON object.
+"""
+
+    try:
+        raw = provider.analyze(question=prompt, model_spec=model_spec, max_tokens=4096)
+    except ProviderError as e:
+        raise PlanError(f"LLM Q&A failed: {e}") from e
+
+    try:
+        data = _parse_json_object_from_llm(raw)
+    except json.JSONDecodeError as e:
+        raise PlanError(f"LLM did not return valid JSON: {e}\n---\n{raw[:1200]}") from e
+
+    blob = data.get("answers")
+    if not isinstance(blob, dict):
+        raise PlanError('LLM JSON must contain an object at key "answers".')
+
+    out: dict[str, str] = {}
+    for q in questions:
+        qid = q["id"]
+        val = blob.get(qid)
+        s = val.strip() if isinstance(val, str) else ""
+        if not s:
+            if q.get("required"):
+                raise PlanError(f'Missing or empty answer for required id "{qid}".')
+            s = "N/A"
+        out[qid] = s
+
+    return out
+
+
 def reason_over_acts(
     user_answers: dict[str, str],
     provider_name: str | None = None,
@@ -232,13 +343,13 @@ def reason_over_acts(
             return _build_plan_from_native_reasoning(user_answers)
 
         # Use configured provider for reasoning
+        from .providers import effective_text_model_spec, get_provider
+
         provider = get_text_provider()
         if provider_name:
-            from .providers import get_provider
-
             provider = get_provider(provider_name)
 
-        model_spec = get_text_model_spec()
+        model_spec = effective_text_model_spec(provider)
 
         response = provider.analyze(
             question=prompt,

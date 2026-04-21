@@ -601,3 +601,18 @@ def get_vision_model_spec() -> ModelSpec:
 def get_text_model_spec() -> ModelSpec:
     """Get the configured text model."""
     return get_model_spec("RENG_TEXT_MODEL", DEFAULT_TEXT_MODEL)
+
+
+def effective_text_model_spec(provider: BaseProvider | NativeClaudeProvider) -> ModelSpec:
+    """
+    Return a ModelSpec that the given provider can call over HTTP.
+
+    ``get_text_model_spec()`` defaults to the native placeholder, which must
+    never be sent to OpenRouter/Gemini/Fireworks — those need a real model id.
+    """
+    spec = get_text_model_spec()
+    if isinstance(provider, NativeClaudeProvider):
+        return spec
+    if spec.provider == "native" or spec.model_id == DEFAULT_TEXT_MODEL.model_id:
+        return FALLBACK_TEXT_MODEL
+    return spec

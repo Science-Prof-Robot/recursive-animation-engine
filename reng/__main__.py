@@ -6,7 +6,7 @@ Subcommands:
     reng watch                     always-on progress viewer
     reng vision  <image> <q>       standalone single-image analysis
     reng verify  <video>           standalone keyframe extraction
-    reng plan                      create a video plan from user answers
+    reng plan [--llm]              create a video plan (stdin Q&A or one-shot LLM brief)
     reng build <plan.json>         build a video from plan (act by act)
     reng voiceover <text>          generate TTS audio using Gemini Flash
     reng provider <command>          manage and test LLM providers
@@ -23,6 +23,8 @@ from . import __version__
 from .lib.build import ActBuildResult, build_act, build_all_acts, mix_audio_with_video
 from .lib.engine import run as engine_run
 from .lib.plan import (
+    PlanError,
+    gather_answers_via_llm,
     get_planning_questions,
     reason_over_acts,
 )
@@ -113,23 +115,60 @@ def _cmd_plan(args) -> int:
     print("=" * 60)
     print("RECURSIVE ANIMATION ENGINE - PLAN PHASE")
     print("=" * 60)
-    print("\nLet me ask you some questions about your video...\n")
 
     questions = get_planning_questions()
+    to_ask = [q for q in questions if not (args.quick and not q.get("required", False))]
+
     answers: dict[str, str] = {}
 
-    for q in questions:
-        if args.quick and not q["required"]:
-            continue
+    if args.llm:
+        # One free-form brief → LLM fills every planning field (OpenRouter / Gemini / Fireworks).
+        print(
+            "\nUsing LLM to turn your brief into structured planning answers "
+            f"(provider: {args.provider or 'RENG_TEXT_PROVIDER / RENG_LLM_PROVIDER'}).\n"
+        )
+        print("Describe the video you want (2–8 sentences is ideal):\n")
+        brief = input("> ").strip()
+        if not brief:
+            print("Error: empty brief — add a description or run without --llm.", file=sys.stderr)
+            return 1
+        try:
+            answers = gather_answers_via_llm(
+                brief,
+                questions=to_ask,
+                provider_name=args.provider,
+                quick=args.quick,
+            )
+        except PlanError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
 
-        print(f"\n{Q.get('question', q['question'])}")
-        if not q.get("required", False):
-            print("(Press Enter to skip this optional question)")
+        print("\n--- Structured answers (from LLM) ---")
+        for q in to_ask:
+            qid = q["id"]
+            text = answers.get(qid, "")
+            preview = (text[:220] + "…") if len(text) > 220 else text
+            print(f"\n[{qid}] {preview}")
+        print("\nPress Enter to generate the full plan from these answers (Ctrl+C to abort).")
+        try:
+            input()
+        except EOFError:
+            pass
+    else:
+        print(
+            "\nLet me ask you some questions about your video...\n"
+            "(Tip: `reng plan --llm --provider openrouter` fills this from one short brief.)\n"
+        )
 
-        answer = input("> ").strip()
+        for q in to_ask:
+            print(f"\n{q['question']}")
+            if not q.get("required", False):
+                print("(Press Enter to skip this optional question)")
 
-        if answer or q.get("required", False):
-            answers[q["id"]] = answer if answer else "N/A"
+            answer = input("> ").strip()
+
+            if answer or q.get("required", False):
+                answers[q["id"]] = answer if answer else "N/A"
 
     print("\n" + "=" * 60)
     print("Reasoning over your answers and structuring the video plan...")
@@ -443,6 +482,11 @@ def main(argv: list[str] | None = None) -> int:
     p_plan.add_argument(
         "--quick", action="store_true",
         help="Skip optional questions"
+    )
+    p_plan.add_argument(
+        "--llm",
+        action="store_true",
+        help="Ask once for a free-form brief, then use the text LLM to fill all planning answers",
     )
     p_plan.add_argument(
         "--provider",
