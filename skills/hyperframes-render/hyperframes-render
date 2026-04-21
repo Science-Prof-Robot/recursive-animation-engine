@@ -1,0 +1,20 @@
+#!/bin/sh
+# Wrapper that makes `hyperframes-render <project_dir>` work on PATH.
+# The underlying CLI exposes the subcommand as `hyperframes render`,
+# so this shim just prepends `render` before any user args.
+#
+# Point HYPERFRAMES_CLI at your built dist/cli.js if it's not in the
+# default location.
+
+CLI="${HYPERFRAMES_CLI:-$HOME/hyperframes/packages/cli/dist/cli.js}"
+
+if [ ! -f "$CLI" ]; then
+    echo "Error: hyperframes CLI not found at $CLI" >&2
+    echo "" >&2
+    echo "Set HYPERFRAMES_CLI to the path of your built dist/cli.js, or install:" >&2
+    echo "  git clone https://github.com/heygen-com/hyperframes ~/hyperframes" >&2
+    echo "  cd ~/hyperframes && bun install && bun run build" >&2
+    exit 127
+fi
+
+exec node "$CLI" render "$@"
