@@ -1,142 +1,192 @@
-# nanobot-skills
+# recursive-animation-engine
 
-A pair of composable skills for [nanobot](https://github.com/HKUDS/nanobot) that let a cheap text-only agent render animations and *verify them visually* through a vision-capable LLM.
-
-Built and battle-tested in production on Railway. Works with any nanobot deployment.
+An HTML → MP4 rendering pipeline with a built-in self-correction loop. Renders, extracts keyframes, asks a vision model "is this correct?", and iterates until it is — or reports what's still wrong.
 
 ```
- your-agent (Kimi / GLM / whatever)
-        │
-        ├── writes HTML/CSS/JS composition
-        │
-        ├── hyperframes-render   ──► out.mp4          (chromium + bun + ffmpeg)
-        │
-        ├── visual_verify.py     ──► 3 keyframes      (ffmpeg)
-        │
-        └── vision_analyze.py    ──► text description (OpenRouter vision model)
-                                      │
-                                      └── if issues, agent iterates
+HTML/CSS/JS  ─────►  MP4  ─────►  keyframes  ─────►  vision model
+     ▲                                                     │
+     └─────────  if anything is off, patch and retry  ─────┘
+                          (up to 3 loops)
 ```
 
-## What's inside
+Always-on progress viewer lets you see exactly what the engine is doing in real time:
 
-| Skill | What it does |
-|-------|--------------|
-| [`vision`](./skills/vision) | Gives a text-only agent the ability to "see" images. One-shot call to an OpenRouter vision model (GPT-4o, Claude, Gemini, etc.) and returns plain-text analysis. |
-| [`hyperframes-render`](./skills/hyperframes-render) | HTML → MP4 rendering pipeline with a mandatory self-correction loop: render, extract keyframes, vision-verify each frame, iterate up to 3× until visually correct. |
+```
+$ reng watch
+reng watch — tailing ~/.recursive-animation-engine/events.jsonl
 
-The two skills are designed to work together — `hyperframes-render` calls `vision` after each render to check its own output and self-correct.
+14:02:01 a1b2c3 ▶ run start   ./renders/progress-bar  max=3
+14:02:01 a1b2c3 ■ iteration 1
+14:02:01 a1b2c3   render…
+14:02:08 a1b2c3   ✓ rendered out.mp4 (7.2s)
+14:02:08 a1b2c3   extracting 3 keyframe(s)…
+14:02:10 a1b2c3     ✓ out_frame01.png OK
+14:02:12 a1b2c3     ◦ out_frame02.png Bar exceeds container at 50% — text "100%" clips off right edge.
+14:02:14 a1b2c3     ✓ out_frame03.png OK
+14:02:14 a1b2c3 ◦ iteration 1 — 1 issue(s)
+14:02:14 a1b2c3 ■ iteration 2
+14:02:14 a1b2c3   render…
+14:02:22 a1b2c3   ✓ rendered out.mp4 (7.8s)
+14:02:22 a1b2c3     ✓ out_frame01.png OK
+14:02:24 a1b2c3     ✓ out_frame02.png OK
+14:02:26 a1b2c3     ✓ out_frame03.png OK
+14:02:26 a1b2c3 ✓ iteration 2 passed
+14:02:26 a1b2c3 ■ run passed (2 iter) → out.mp4
+```
 
-## Why this exists
+## Why
 
-Most cheap fast models (Kimi K2.5, GLM, Llama, etc.) are **text-only**. They can write HTML and CSS, but they can't *see* the rendered output to know if it looks right. You either:
+Cheap text models (Kimi, GLM, Llama, open-source Gemini variants) write great HTML and CSS — but they're blind. They can't tell you if the progress bar actually animates, if text is clipping, if the chart labels landed in the right place. You end up either:
 
-1. Pay for a vision model on every message (expensive), or
-2. Blindly ship whatever the text model produces (buggy output), or
-3. **Route vision calls only when needed** ← this repo
+1. Paying for a multimodal model on every single message (expensive), or
+2. Blindly shipping whatever was generated (buggy), or
+3. **Routing vision calls only into the verification loop** ← this engine
 
-The `vision` skill is a surgical escape hatch: the primary model stays cheap, and vision only runs during verification loops. The `hyperframes-render` skill turns that into a concrete workflow for animated video rendering.
+Vision fires 3× per iteration (one per keyframe). A full successful run costs ~$0.003 with `gpt-4o-mini`. A 3-iteration worst-case is ~$0.01.
+
+## How it works
+
+Five components, one loop.
+
+| Component | What it does |
+|-----------|--------------|
+| **Render** | Shells out to the Hyperframes CLI → produces an MP4 from an HTML project directory |
+| **Verify** | `ffmpeg` extracts N keyframes from the interior 10%–90% of the video (avoids black fade frames) |
+| **Vision** | One `POST /chat/completions` per frame to OpenRouter with the image + a verification prompt |
+| **Engine** | Orchestrates render → verify → vision, emits events, decides when to stop |
+| **Watch** | Tails the shared event log and pretty-prints in real time |
+
+The loop terminates when:
+- Every keyframe comes back with `OK` from the vision model, **or**
+- `max_iterations` (default 3) is reached — ships the best version
+
+Between failed iterations, an optional `patch_fn` callback runs so an agent can edit the HTML/CSS before the next render.
 
 ## Install
 
-Drop the skills into your nanobot workspace:
-
 ```bash
-cd ~/.nanobot/workspace
-git clone https://github.com/Science-Prof-Robot/nanobot-skills /tmp/nanobot-skills
-cp -r /tmp/nanobot-skills/skills/* ./skills/
+pip install git+https://github.com/Science-Prof-Robot/recursive-animation-engine
 ```
 
-nanobot auto-discovers anything under `workspace/skills/`, so the next message will see both skills.
+Or from source:
 
-### Environment variables
+```bash
+git clone https://github.com/Science-Prof-Robot/recursive-animation-engine
+cd recursive-animation-engine
+pip install -e .
+```
 
-| Variable | Required by | Purpose |
-|----------|-------------|---------|
-| `OPENROUTER_API_KEY` | `vision` | OpenRouter API key ([get one](https://openrouter.ai/keys)) |
-| `VISION_MODEL` | `vision` (optional) | Defaults to `openai/gpt-4o-mini` |
-| `HYPERFRAMES_CLI` | `hyperframes-render` (optional) | Path to built `dist/cli.js`; defaults to `~/hyperframes/packages/cli/dist/cli.js` |
-
-### System dependencies (for `hyperframes-render`)
+### System dependencies
 
 | Tool | Install |
 |------|---------|
 | [`bun`](https://bun.sh) | `curl -fsSL https://bun.sh/install \| bash` |
-| `ffmpeg` | `apt-get install ffmpeg` or `brew install ffmpeg` |
-| `chromium` | `apt-get install chromium` (point puppeteer at it with `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`) |
-| `node` | `apt-get install nodejs` or use nvm |
-| [Hyperframes](https://github.com/heygen-com/hyperframes) | `git clone && bun install && bun run build` |
+| `ffmpeg` | `apt-get install ffmpeg` / `brew install ffmpeg` |
+| `chromium` | `apt-get install chromium` (set `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`) |
+| `node` | `apt-get install nodejs` / use nvm |
+| [Hyperframes](https://github.com/heygen-com/hyperframes) | `git clone` → `bun install` → `bun run build` |
 
-## Quick start
+### Environment variables
 
-### Just vision (no rendering)
+| Variable | Required | Default |
+|----------|----------|---------|
+| `OPENROUTER_API_KEY` | yes | — |
+| `VISION_MODEL` | no | `openai/gpt-4o-mini` |
+| `HYPERFRAMES_CLI` | no | `~/hyperframes/packages/cli/dist/cli.js` |
+| `RENG_EVENT_LOG` | no | `~/.recursive-animation-engine/events.jsonl` |
+
+## Usage
+
+### One-shot render
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-v1-...
-python skills/vision/vision_analyze.py ./screenshot.png "What text is in this image?"
+reng render ./renders/progress-bar --intent "progress bar fills 0% → 100% smoothly"
 ```
 
-### Full rendering + verification loop
+Exit code `0` = passed or hit max iterations (check `status` in output).
+Exit code `1` = render or vision errored.
 
-From inside your nanobot chat, just ask:
+### Live progress viewer (always-on)
 
-> Create a 10-second animation showing a progress bar filling up from 0% to 100% with a smooth ease-out curve.
+Run this in a second terminal and leave it open:
 
-The agent will:
+```bash
+reng watch
+```
 
-1. Write the HTML/CSS/JS composition under `renders/progress-bar/`
-2. Call `hyperframes-render renders/progress-bar` → `out.mp4`
-3. Extract 3 keyframes via `visual_verify.py` (10%, 50%, 90% of duration)
-4. Run `vision_analyze.py` on each keyframe to confirm the progress bar is rendering correctly
-5. Iterate if anything looks off, up to 3 times
-6. Deliver the final MP4 with an iteration count
+Filter to one run by ID:
 
-## Design principles
+```bash
+reng watch --follow-run a1b2c3d4
+```
 
-### Cheap primary, expensive verification
+Replay the last hour of history, then tail forever:
 
-The text model does 99% of the work. Vision only runs 3 times per iteration (one per keyframe), which is ~$0.001 with `gpt-4o-mini`. A 3-iteration render costs about $0.01 in vision calls.
+```bash
+reng watch --since 1h
+```
 
-### Explicit failure modes
+### Standalone vision (no render)
 
-If a CLI command fails twice with "not found", the skill tells the agent to **stop and report** instead of brute-forcing. This prevents the "silent spinning" failure mode where an agent burns tokens on a broken environment.
+```bash
+reng vision screenshot.png "What error is shown here?"
+```
 
-### Deterministic keyframe sampling
+### Standalone keyframe extraction
 
-`visual_verify.py` samples evenly across the 10%–90% duration window, avoiding black first/last frames. Three samples catches most visual bugs (wrong start state, missing middle transition, early cutoff).
+```bash
+reng verify input.mp4 --frames 5
+```
 
-### Iteration cap
+### Programmatic (Python)
 
-Hard-coded max of 3 loops per render. Prevents runaway cost when output is "close enough but not perfect" — the skill ships the best version and tells the user what's still off.
+```python
+from reng.lib.engine import run
+
+def patch(result):
+    # result.issues contains vision's feedback per failed frame
+    # edit HTML/CSS files in the project dir based on those issues
+    for issue in result.issues:
+        apply_my_fix(result.iteration, issue)
+
+outcome = run(
+    "./renders/progress-bar",
+    intent="progress bar fills 0% → 100% smoothly",
+    max_iterations=3,
+    patch_fn=patch,
+)
+
+print(outcome.status)        # "passed" | "max_iterations" | "error"
+print(outcome.final_video)   # Path to the final MP4
+for it in outcome.iterations:
+    print(it.iteration, it.passed, it.issues)
+```
+
+## Agent integration
+
+If you're wiring this into an agent framework (nanobot, autogen, langgraph, custom), drop `SKILL.md` into your agent's skill/tool definitions. It describes the engine, when to use it, and the CLI surface. The engine emits events to a shared log so your agent can also `tail -f` the log for real-time updates — no special IPC needed.
+
+## Swapping the renderer
+
+The engine is renderer-agnostic. `reng/lib/render.py` is a ~60-line shim around the Hyperframes CLI. To use Remotion, Manim, Playwright recording, etc., replace that module's `render()` function — the rest of the pipeline (verify, vision, loop, events) stays the same.
 
 ## Recommended vision models
 
-| Model | Best for |
-|-------|----------|
-| `openai/gpt-4o-mini` | Cheap and fast; good default |
-| `openai/gpt-4o` | Higher detail, more nuance |
-| `anthropic/claude-sonnet-4-6` | Best for complex scenes and long reasoning |
-| `google/gemini-2.0-flash` | Fastest, huge context, good for batch verification |
+| Model | When |
+|-------|------|
+| `openai/gpt-4o-mini` | Default; cheapest that's still good at general UI checks |
+| `openai/gpt-4o` | When verification quality matters more than $/run |
+| `anthropic/claude-sonnet-4-6` | Complex scenes, multi-element reasoning |
+| `google/gemini-2.0-flash` | Fastest; large context if you pass multiple frames later |
 
-Switch by setting `VISION_MODEL=<any-openrouter-model-id>`.
+## Design principles
 
-## Tested with
-
-- [nanobot](https://github.com/HKUDS/nanobot) v0.1.5
-- Deployed on Railway behind a Telegram + AgentMail gateway
-- Primary model: Kimi K2.5 Turbo (via Fireworks) and GLM (via OpenRouter)
-- Vision model: `openai/gpt-4o-mini`
-- Hyperframes: latest `main` from `heygen-com/hyperframes`
+- **Cheap primary, expensive verification.** The engine doesn't care what wrote the HTML — use the cheapest model that's competent. Vision only pays off at verification time.
+- **Deterministic keyframe sampling.** Always samples 10%–90% of duration so we never verify a fade-in black frame as "broken".
+- **Hard iteration cap.** Max 3 loops. Prevents runaway cost when output is close-enough but never perfect.
+- **Explicit failure modes.** If the render binary is missing or the vision API errors, the engine stops and reports. No silent retries, no "spinning" illusion.
+- **File-based event bus.** Append-only NDJSON log means any number of watchers can observe without coupling to the engine. Works across processes, containers, SSH sessions.
 
 ## License
 
 MIT — see [LICENSE](./LICENSE).
-
-## Contributing
-
-PRs welcome. Ideas:
-
-- `vision-diff` skill (compare two screenshots and describe differences)
-- More render themes in `hyperframes-render` (retro pixel, motion graphics, etc.)
-- Benchmarks: vision accuracy vs. cost across different models
-- Support for other rendering engines (Remotion, Manim)

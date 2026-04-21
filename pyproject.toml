@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "recursive-animation-engine"
+version = "0.1.0"
+description = "Recursive HTML→MP4 rendering with vision-based self-correction"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Ashish Dogra" }]
+keywords = ["animation", "rendering", "vision", "llm", "agent", "self-correction"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "httpx>=0.28",
+]
+
+[project.urls]
+Homepage = "https://github.com/Science-Prof-Robot/recursive-animation-engine"
+Issues = "https://github.com/Science-Prof-Robot/recursive-animation-engine/issues"
+
+[project.scripts]
+reng = "reng.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["reng"]

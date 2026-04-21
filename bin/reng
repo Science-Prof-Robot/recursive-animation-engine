@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Standalone launcher — works without `pip install` when run from the repo."""
+import sys
+from pathlib import Path
+
+# Make the repo root importable regardless of CWD
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+from reng.__main__ import main
+
+if __name__ == "__main__":
+    sys.exit(main())
