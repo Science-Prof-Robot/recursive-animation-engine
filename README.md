@@ -71,7 +71,7 @@ Latest from GitHub (if you need unreleased changes):
 pip install git+https://github.com/Science-Prof-Robot/recursive-animation-engine
 ```
 
-Or from source:
+Or from source (Python + Hyperframes in one clone):
 
 ```bash
 git clone https://github.com/Science-Prof-Robot/recursive-animation-engine
@@ -80,29 +80,35 @@ npm install   # Node 22+ — installs Hyperframes CLI into node_modules/.bin
 pip install -e .
 ```
 
+Step-by-step usage (keys, scaffolding, `reng render`, plan/build) is in **[How to use](#how-to-use)** below.
+
 ### System dependencies
+
 
 | Tool | Install |
 |------|---------|
 | **Node.js** | **22+** (required for the bundled Hyperframes npm package). Use `nvm`, `fnm`, or your OS package manager. |
-| **Hyperframes CLI** | **Preferred:** from the repo root run **`npm install`** once — this installs the official [`hyperframes`](https://www.npmjs.com/package/hyperframes) CLI next to the project (no separate clone). `reng` resolves `node_modules/.bin/hyperframes` automatically. **Legacy:** build the [Hyperframes monorepo](https://github.com/heygen-com/hyperframes) with Bun and set `HYPERFRAMES_CLI` to `packages/cli/dist/cli.js`. |
-| `ffmpeg` | `apt-get install ffmpeg` / `brew install ffmpeg` |
-| `chromium` | Used by Hyperframes for headless capture; install Chromium/Chrome and set `PUPPETEER_EXECUTABLE_PATH` if it is not discovered automatically. |
-| [`bun`](https://bun.sh) | Optional — only if you develop against a cloned Hyperframes monorepo instead of `npm install`. |
+| **Hyperframes CLI** | **Preferred:** from this repo’s root run **`npm install`** once — installs the official [hyperframes](https://www.npmjs.com/package/hyperframes) CLI under `node_modules/.bin/`. `reng` finds it automatically when your shell’s cwd is inside this repo (or a parent still contains that `node_modules`). **Legacy:** build the [Hyperframes monorepo](https://github.com/heygen-com/hyperframes) with Bun and set `HYPERFRAMES_CLI` to `packages/cli/dist/cli.js`. |
+| **ffmpeg** | `apt-get install ffmpeg` / `brew install ffmpeg` |
+| **Chromium** | Hyperframes drives headless Chrome. Install Chromium/Chrome; set `PUPPETEER_EXECUTABLE_PATH` if it is not discovered automatically. |
+| **bun** | Optional — only if you maintain a cloned Hyperframes monorepo instead of `npm install`. See [bun.sh](https://bun.sh). |
+
 
 ### Environment variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `OPENROUTER_API_KEY` | yes* | — | OpenRouter API key |
-| `GEMINI_API_KEY` | yes* | — | Google Gemini API key (for TTS and native Gemini) |
-| `FIREWORKS_API_KEY` | yes* | — | Fireworks AI API key |
-| `RENG_LLM_PROVIDER` | no | `openrouter` | Default provider: `openrouter`, `gemini`, `fireworks`, `native` |
-| `RENG_VISION_PROVIDER` | no | `openrouter` | Provider for vision tasks |
-| `RENG_TEXT_PROVIDER` | no | `native` | Text generation provider (`native` = Claude Code context) |
-| `RENG_VISION_MODEL` | no | `google/gemma-3-27b-it` | Vision model ID |
-| `HYPERFRAMES_CLI` | no | *(auto)* | Override: path to `hyperframes` binary, or legacy `cli.js` for `node … render` |
-| `RENG_EVENT_LOG` | no | `~/.recursive-animation-engine/events.jsonl` | Event log path |
+
+| Variable               | Required | Default                                      | Description                                                                    |
+| ---------------------- | -------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
+| `OPENROUTER_API_KEY`   | yes*     | —                                            | OpenRouter API key                                                             |
+| `GEMINI_API_KEY`       | yes*     | —                                            | Google Gemini API key (for TTS and native Gemini)                              |
+| `FIREWORKS_API_KEY`    | yes*     | —                                            | Fireworks AI API key                                                           |
+| `RENG_LLM_PROVIDER`    | no       | `openrouter`                                 | Default provider: `openrouter`, `gemini`, `fireworks`, `native`                |
+| `RENG_VISION_PROVIDER` | no       | `openrouter`                                 | Provider for vision tasks                                                      |
+| `RENG_TEXT_PROVIDER`   | no       | `native`                                     | Text generation provider (`native` = Claude Code context)                      |
+| `RENG_VISION_MODEL`    | no       | `google/gemma-3-27b-it`                      | Vision model ID                                                                |
+| `HYPERFRAMES_CLI`      | no       | *(auto)*                                     | Override: path to `hyperframes` binary, or legacy `cli.js` for `node … render` |
+| `RENG_EVENT_LOG`       | no       | `~/.recursive-animation-engine/events.jsonl` | Event log path                                                                 |
+
 
 *At least one provider key is required depending on your setup.
 
@@ -115,6 +121,108 @@ npm test
 ```
 
 This runs `hyperframes --version`, checks that `ffmpeg` is on your `PATH`, and executes the stdlib `unittest` suite (CLI resolution + smoke checks). A full headless render check is opt-in: `RUN_HYPERFRAMES_RENDER=1 npm test`.
+
+## How to use
+
+**For AI agents (Claude Code, Cursor, OpenClaw):** follow **[SKILL.md](SKILL.md)** for the QnA-first workflow, guardrails, and phase checklist; use **[docs/AGENT_VIDEO_SKILL.md](docs/AGENT_VIDEO_SKILL.md)** as a long-form tick list.
+
+You always need **three layers**: the **`reng`** CLI (Python), the **Hyperframes** renderer (Node; installed via `npm` as below), and **at least one LLM API key** (OpenRouter is the default for vision).
+
+### 1. Install `reng` (Python)
+
+Pick one:
+
+```bash
+pip install recursive-animation-engine
+```
+
+Or from a clone of this repo (editable install):
+
+```bash
+git clone https://github.com/Science-Prof-Robot/recursive-animation-engine
+cd recursive-animation-engine
+npm install
+pip install -e .
+```
+
+### 2. Install Hyperframes (Node)
+
+- **If you use a clone of this repo:** from the **same repo root** (where `package.json` lives), run:
+
+  ```bash
+  npm install
+  ```
+
+  That installs `node_modules/.bin/hyperframes`. Run `reng` from a directory under that tree (or a parent that still contains this `node_modules`), **or** set an explicit path:
+
+  ```bash
+  export HYPERFRAMES_CLI="/absolute/path/to/recursive-animation-engine/node_modules/.bin/hyperframes"
+  ```
+
+- **If you installed only from PyPI** (no clone): create or enter any folder where you keep video projects and run `npm install hyperframes`, then export `HYPERFRAMES_CLI` to that folder’s `node_modules/.bin/hyperframes`, **or** use `npx hyperframes …` in your own scripts.
+
+You also need **ffmpeg** and a working **Chromium/Chrome** for Hyperframes (see the table above).
+
+### 3. Set API keys (shell)
+
+Minimum for the default **OpenRouter** vision path:
+
+```bash
+export OPENROUTER_API_KEY="your-key"
+```
+
+Optional but useful for **`reng plan --llm`** and for plan JSON generation without “native” Claude Code:
+
+```bash
+export RENG_TEXT_PROVIDER=openrouter
+```
+
+Other providers (`GEMINI_API_KEY`, `FIREWORKS_API_KEY`, etc.) are documented in the environment table below.
+
+### 4. Create a Hyperframes project (composition)
+
+Hyperframes expects a small project directory (HTML + `hyperframes.json`). Scaffold one anywhere:
+
+```bash
+mkdir -p ~/videos && cd ~/videos
+npx hyperframes init my-scene
+# edit my-scene/index.html until you are happy, then render with reng:
+```
+
+### 5. Run a one-shot render + vision loop
+
+From a shell where `OPENROUTER_API_KEY` is set and Hyperframes is discoverable (step 2):
+
+```bash
+reng render ~/videos/my-scene --intent "Describe what should look correct in the final video"
+```
+
+`reng` calls Hyperframes to produce `out.mp4`, extracts keyframes, and queries the vision model. Exit code `0` means the run finished without a hard error (see printed **status** for pass vs max iterations).
+
+### 6. Watch progress (optional)
+
+In a **second** terminal:
+
+```bash
+reng watch
+```
+
+### 7. Plan → build (multi-act workflow)
+
+1. Create a plan (stdin questions, or LLM-filled brief):
+
+   ```bash
+   reng plan -o video_plan.json
+   # or: reng plan --llm --provider openrouter -o video_plan.json
+   ```
+
+2. Build from the plan:
+
+   ```bash
+   reng build video_plan.json ./build_output
+   ```
+
+More CLI detail follows in **Usage** below.
 
 ## Usage
 
@@ -129,6 +237,7 @@ reng plan -o video_plan.json
 ```
 
 This asks about:
+
 - Purpose and topic
 - Target duration (short/medium/long)
 - Visual style preferences
@@ -146,6 +255,7 @@ reng build video_plan.json ./build_output
 ```
 
 This:
+
 - Creates act subdirectories (`act01/`, `act02/`, etc.)
 - Renders each act with recursive verification
 - Generates voiceover per act (if scripted)
@@ -153,6 +263,7 @@ This:
 - Mixes voiceover with video
 
 Options:
+
 - `--max-iterations N` - Max render-verify cycles per act (default: 3)
 - `--no-voiceover` - Skip TTS generation
 - `--no-combine` - Don't concatenate acts
@@ -307,6 +418,7 @@ result = provider.analyze(
 ## Multi-Provider Configuration
 
 ### OpenRouter (default)
+
 Unified API for 100+ models.
 
 ```bash
@@ -316,6 +428,7 @@ export RENG_VISION_MODEL=google/gemma-3-27b-it
 ```
 
 ### Google Gemini API
+
 Native Gemini with competitive pricing.
 
 ```bash
@@ -325,6 +438,7 @@ export RENG_VISION_MODEL=gemini-2.0-flash
 ```
 
 ### Fireworks AI
+
 Fast inference for production.
 
 ```bash
@@ -348,19 +462,23 @@ export RENG_VISION_MODEL=google/gemma-3-27b-it
 
 ### Vision
 
-| Model | Provider | When |
-|-------|----------|------|
+
+| Model                   | Provider   | When                             |
+| ----------------------- | ---------- | -------------------------------- |
 | `google/gemma-3-27b-it` | OpenRouter | Default, excellent vision + text |
-| `google/gemma-3-12b-it` | OpenRouter | Faster, still capable |
-| `gemini-2.0-flash` | Gemini API | Native Google, good pricing |
+| `google/gemma-3-12b-it` | OpenRouter | Faster, still capable            |
+| `gemini-2.0-flash`      | Gemini API | Native Google, good pricing      |
+
 
 ### Text
 
-| Provider | Model | Use case |
-|----------|-------|----------|
-| `native` | Claude Code | Default, uses existing context |
-| OpenRouter | `anthropic/claude-sonnet-4` | High-quality reasoning |
-| OpenRouter | `google/gemma-3-27b-it` | Unified vision+text |
+
+| Provider   | Model                       | Use case                       |
+| ---------- | --------------------------- | ------------------------------ |
+| `native`   | Claude Code                 | Default, uses existing context |
+| OpenRouter | `anthropic/claude-sonnet-4` | High-quality reasoning         |
+| OpenRouter | `google/gemma-3-27b-it`     | Unified vision+text            |
+
 
 ## Design Principles
 

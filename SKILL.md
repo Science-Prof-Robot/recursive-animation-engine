@@ -1,362 +1,256 @@
 ---
 name: recursive-animation-engine
-description: Render HTML/CSS/JS animations to MP4 and verify them visually in a recursive self-correction loop. Use when the user asks for animations, motion graphics, video explainers, or any rendered visual output where correctness matters. Features multi-provider LLM support (OpenRouter, Gemini, Fireworks), Gemini TTS 3.1 Flash voiceover, and structured plan/build workflow. The engine handles render → extract keyframes → vision-check → iterate automatically, so you only need to write good HTML and let the loop correct it.
+description: >-
+  Agent-first video production: start with structured QnA, then plan (reng plan),
+  scaffold Hyperframes projects, and deliver MP4s with recursive vision verification
+  (render → keyframes → vision → patch → retry). Use for motion graphics, explainers,
+  multi-act videos, and any HTML→video pipeline where “looks right” matters. Stack:
+  Hyperframes CLI (npm install in engine repo) + reng + OpenRouter/Gemini/Fireworks.
+  Do not build unrelated web apps, dashboards, or deployable sites unless the user
+  explicitly asks. Do not run hyperframes preview or reng render/build until the user
+  confirmed the brief/plan or opted into autopilot (“go ahead”, “just render”).
 ---
 
-# Recursive Animation Engine
+# Recursive Animation Engine (agent skill)
 
-A comprehensive pipeline that renders HTML compositions to MP4 and uses vision models to verify the output is correct. Features multi-provider LLM support, TTS voiceover generation, and structured plan/build workflows for complex video productions.
+Deliver **high-quality video** from **HTML compositions** (Hyperframes) with **recursive vision checks** (`reng`). This file is the **canonical skill** for Claude Code, Cursor, OpenClaw, and similar agents.
 
-## How it works
+**Long checklist:** [docs/AGENT_VIDEO_SKILL.md](docs/AGENT_VIDEO_SKILL.md)  
+**Install, env vars, “How to use”:** [README.md](README.md)
 
-### Basic Loop (legacy)
-```
-1. you write HTML/CSS/JS
-2. engine renders it to MP4                       (Hyperframes CLI via `npm install` + Chromium + ffmpeg)
-3. engine extracts 3 keyframes from the MP4       (ffmpeg)
-4. engine asks a vision model: "is this correct?" (Gemma via OpenRouter/Gemini/Fireworks)
-5. if any frame fails → you patch the HTML → loop back to step 2
-6. max 3 iterations, then ship the best version
-```
-
-### Full Workflow (plan → build → combine)
-```
-1. PLAN PHASE: Ask user structured questions about the video
-2. REASON: LLM reasons over acts/scenes based on answers
-3. BUILD PHASE: Build each act with vision loop verification
-4. VOICEOVER: Generate Gemini TTS 3.1 Flash narration per act
-5. COMBINE: Stitch acts together, mix audio, deliver final MP4
+```mermaid
+flowchart LR
+  discover[Discover_QnA]
+  plan[Plan_JSON]
+  scaffold[Scaffold_Hyperframes]
+  author[Author_HTML]
+  verify[VerifyLoop_reng]
+  deliver[Deliver_MP4]
+  discover --> plan --> scaffold --> author --> verify --> deliver
 ```
 
-All progress is streamed to `~/.recursive-animation-engine/events.jsonl` — run `reng watch` in a separate terminal to see what's happening in real time.
-
-### One-step Hyperframes (Node 22+)
-
-From the **recursive-animation-engine** repo root, run **`npm install`** once. That installs the official Hyperframes CLI into `node_modules/.bin`; `reng` picks it up automatically (no `~/hyperframes` clone). Override with `HYPERFRAMES_CLI` only if you use a custom binary or legacy `cli.js`.
-
-## Using it from an agent
-
-### Plan Phase (structured video planning)
-
-```bash
-reng plan -o video_plan.json
-```
-
-This interactively asks the user about:
-- Purpose (educational, promotional, demo, etc.)
-- Topic/content
-- Target duration (short/medium/long)
-- Target audience
-- Visual style preference
-- Voiceover needs
-- Existing assets
-
-Then reasons over the answers to produce a structured `VideoPlan` with acts, timing, and narration scripts.
-
-### Build Phase (act-by-act construction)
-
-```bash
-reng build video_plan.json ./build_output
-```
-
-Builds each act sequentially:
-- Renders HTML/CSS for each act
-- Vision verification per act
-- Voiceover generation per act (if scripted)
-- Combines all acts into final video
-- Mixes audio tracks
-
-Options:
-- `--max-iterations N` - Max render-verify cycles per act (default: 3)
-- `--no-voiceover` - Skip TTS generation
-- `--no-combine` - Don't concatenate acts
-- `--no-mix-audio` - Don't mix voiceover with final video
-
-### Fully-automated one-shot
-
-```bash
-reng render ./renders/my-scene --intent "spinning progress bar from 0 to 100%"
-```
-
-The CLI renders, verifies, and exits with 0 if it passed. Exit code 1 means the render or vision call errored (different from "didn't pass verification" which is exit 0 with status `max_iterations`).
-
-### Agent-driven (loop in your code)
-
-```python
-from reng.lib.engine import run
-
-def my_patch_fn(iteration_result):
-    # inspect iteration_result.issues and edit files in the project dir
-    # before the engine re-renders
-    for issue in iteration_result.issues:
-        print("fix needed:", issue)
-        # ... your agent decides what to change here
-
-result = run(
-    "./renders/my-scene",
-    intent="spinning progress bar from 0 to 100%",
-    max_iterations=3,
-    patch_fn=my_patch_fn,
-)
-print(result.status, result.final_video)
-```
-
-### Voiceover Generation (Gemini TTS 3.1 Flash)
-
-```bash
-# Simple text to speech
-reng voiceover "Welcome to our product demo" -o intro.mp3
-
-# From file
-reng voiceover --file script.txt -o narration.mp3
-
-# Custom voice and rate
-reng voiceover "Hello world" -o hello.mp3 --voice en-GB-Neural2-B --rate 0.9
-
-# SSML for fine control
-reng voiceover '<speak>Hello <break time="1s"/> World</speak>' -o ssml.mp3
-```
-
-### Standalone vision check (no rendering)
-
-```bash
-# Default Gemma via OpenRouter
-reng vision screenshot.png "What error is shown here?"
-
-# Specific provider
-reng vision screenshot.png "What do you see?" --provider gemini
-
-# Specific model
-reng vision screenshot.png "Describe the layout" --model google/gemma-3-27b-it
-```
-
-### Provider management
-
-```bash
-# Test all configured providers
-reng provider test
-
-# List recommended models
-reng provider list-models
-
-# Show environment setup
-reng provider env
-```
+---
 
 ## When to use
 
-- Any animation / motion graphic / video explainer request
-- Multi-act videos with narration and structured flow
-- UI screen-recording verification (did the hover state actually animate?)
-- Chart or diagram rendering (did the labels land where they should?)
-- Any task where the output is visual and "looks right" matters more than the code
+- Explainer / promo / tutorial / social **video** from HTML + motion
+- **Multi-act** productions (plan → per-act build → combine)
+- Anything where **visual correctness** must be checked (keyframes + vision)
+- Agent should **own scaffolding** (dirs, `hyperframes init`, plan file) without the user memorizing CLIs
 
 ## When NOT to use
 
-- One-off still images (just call `reng vision` directly)
-- Text-only deliverables (no visual output to verify)
-- Purely data output (numbers, JSON, CSV)
+- **Still images only** → use `reng vision` alone if a single frame check is enough
+- **Text-only** deliverables (no MP4 / no composition)
+- **Generic web apps** (SPAs, dashboards, deployable sites) — **out of scope** unless the user **explicitly** asks for that *in addition* to video
 
-## Progress monitoring
+---
 
-Keep a second terminal open with:
+## Operating principles (read before acting)
+
+1. **QnA first** — Capture goals, audience, duration, style, voiceover, assets. Write a short `brief.md` before scaffolding.
+2. **No silent heavy work** — Do **not** run `reng render`, `reng build`, or headless Chrome until the user **confirmed** the brief and plan summary **or** clearly opted into **autopilot** (e.g. “go ahead”, “render without asking again”).
+3. **Video artifact default** — Primary outputs are **MP4** (+ plan JSON, HTML project dirs). Not a separate production web application.
+4. **No preview servers unless asked** — Do **not** start `hyperframes preview`, Vite, Next dev server, etc. unless the user requests live preview.
+5. **Prefer LLM plan QnA when keys allow** — With `OPENROUTER_API_KEY` and `RENG_TEXT_PROVIDER=openrouter`, use `reng plan --llm --provider openrouter`; otherwise interactive `reng plan`.
+6. **Hyperframes via npm (default)** — From the **recursive-animation-engine** repo root: `npm install` (Node 22+) installs `node_modules/.bin/hyperframes`. `reng` resolves it when cwd is under that tree, or set `HYPERFRAMES_CLI` to the absolute path to `hyperframes`. **Legacy:** Bun-built monorepo `~/hyperframes/.../cli.js` — footnote only; see [docs/AGENT_VIDEO_SKILL.md](docs/AGENT_VIDEO_SKILL.md#legacy-hyperframes-optional).
+
+---
+
+## Default project layout (convention)
+
+Create a stable workspace per job:
+
+```text
+video-workspaces/<slug>/
+  brief.md              # QnA summary + user goals
+  plan.json             # from reng plan
+  acts/
+    act01/              # Hyperframes project (index.html, hyperframes.json, …)
+    act02/
+  build_output/         # optional: reng build default tree (final mp4s here)
+```
+
+Single-scene shortcut: one folder `video-workspaces/<slug>/composition/` with `npx hyperframes init` inside it is fine if you then `reng render` that path.
+
+---
+
+## Phase workflow (what to do, in order)
+
+### Phase 0 — Preflight
+
+- Confirm Node 22+, `ffmpeg`, Chromium; `npm install` in engine repo if using bundled Hyperframes.
+- Confirm `reng` on PATH and API keys per [README.md](README.md#environment-variables).
+- Optional: `npm test` at engine repo root.
+
+### Phase 1 — Discover (QnA)
+
+Run a structured interview (purpose, topic, duration, audience, style, voiceover, assets). Persist **`brief.md`**.  
+**Guardrail:** confirm user does **not** want a generic web app unless they say so.
+
+### Phase 2 — Plan
+
+After user confirms the brief (unless autopilot):
+
+```bash
+export OPENROUTER_API_KEY=...   # or other provider per README
+export RENG_TEXT_PROVIDER=openrouter   # recommended for --llm and non-native reasoning
+reng plan --llm --provider openrouter -o video-workspaces/<slug>/plan.json
+# fallback without LLM QnA:
+# reng plan -o video-workspaces/<slug>/plan.json
+```
+
+Summarize acts and duration for the user; get explicit OK before scaffold + render.
+
+### Phase 3 — Scaffold
+
+From `video-workspaces/<slug>/` (or your agreed root):
+
+```bash
+mkdir -p acts && cd acts
+npx hyperframes init act01
+# creates acts/act01/ with index.html + hyperframes.json — repeat act02… for multi-act
+```
+
+For **one-shot** work, a single `npx hyperframes init <name>` folder anywhere is enough if you pass that path to `reng render`.
+
+### Phase 4 — Author HTML
+
+Edit `index.html` / assets per Hyperframes composition rules and the brief. Keep scope aligned with **plan.json** acts.
+
+### Phase 5 — Verify loop (recursive)
+
+**Only after confirmation or autopilot.**
+
+One-shot:
+
+```bash
+reng render video-workspaces/<slug>/acts/act01 --intent "Vision check: <concise success criteria>"
+```
+
+Multi-act (from plan):
+
+```bash
+reng build video-workspaces/<slug>/plan.json video-workspaces/<slug>/build_output
+```
+
+**Second terminal (recommended):**
 
 ```bash
 reng watch
 ```
 
-It tails the event log and shows live status: render start/done, each keyframe check, each iteration's verdict, and the final result. Useful when runs take minutes and you want to confirm the engine is still making forward progress (not stuck).
+**Loop contract:** render → extract keyframes → vision model per frame → if not OK, patch HTML → re-render (up to `max_iterations`, default 3). Engine logs to `~/.recursive-animation-engine/events.jsonl`.
 
-Filter to one run:
-
-```bash
-reng watch --follow-run <run_id>
-```
-
-Replay recent history before tailing:
-
-```bash
-reng watch --since 1h
-```
-
-## Multi-Provider LLM Support
-
-The engine supports multiple LLM providers for vision and text generation:
-
-### OpenRouter (default)
-Unified API for 100+ models. Default vision model: `google/gemma-3-27b-it`
-
-```bash
-export OPENROUTER_API_KEY='your-key'
-export RENG_LLM_PROVIDER=openrouter
-export RENG_VISION_MODEL=google/gemma-3-27b-it
-```
-
-### Google Gemini API
-Native Gemini models with competitive pricing.
-
-```bash
-export GEMINI_API_KEY='your-key'
-export RENG_LLM_PROVIDER=gemini
-export RENG_VISION_MODEL=gemini-2.0-flash
-```
-
-### Fireworks AI
-Fast inference optimized for production.
-
-```bash
-export FIREWORKS_API_KEY='your-key'
-export RENG_LLM_PROVIDER=fireworks
-export RENG_VISION_MODEL=google/gemma-3-27b-it
-```
-
-### Provider Selection
-
-You can mix providers for different tasks:
-
-```bash
-# Use Gemini for vision, native Claude Code for text
-export RENG_VISION_PROVIDER=gemini
-export RENG_TEXT_PROVIDER=native
-
-# Use OpenRouter for both
-export RENG_LLM_PROVIDER=openrouter
-```
-
-## Gemini TTS 3.1 Flash
-
-Generate high-quality voiceovers with Google's latest TTS model:
+**Agent-driven (code):**
 
 ```python
-from reng.lib.providers import GeminiTTSProvider
+from reng.lib.engine import run
 
-tts = GeminiTTSProvider()
-audio_path = tts.generate_voiceover(
-    text="Welcome to our presentation",
-    voice_name="en-US-Neural2-D",  # or en-GB-Neural2-B, etc.
-    speaking_rate=1.0,
-    pitch=0.0,
-    output_path=Path("welcome.mp3")
+def patch_fn(result):
+    for issue in result.issues:
+        # edit files under the project dir based on issue text
+        ...
+
+out = run(
+    "video-workspaces/<slug>/acts/act01",
+    intent="…",
+    max_iterations=3,
+    patch_fn=patch_fn,
 )
 ```
 
-SSML support for fine-grained control:
+### Phase 6 — Deliver
 
-```python
-ssml = '''<speak>
-    <emphasis level="strong">Welcome!</emphasis>
-    <break time="500ms"/>
-    <prosody rate="slow" pitch="-1st">Let me show you around.</prosody>
-</speak>'''
+- Point user to **`out.mp4`** (per act) or combined outputs under **`build_output/`** (see [README Usage](README.md#usage) for `reng build` behavior).
+- Confirm file size > 0, duration ballpark matches plan, and offer one more vision pass if they want polish.
 
-audio_path = tts.generate_voiceover_ssml(
-    ssml=ssml,
-    voice_name="en-US-Neural2-D",
-    output_path=Path("ssml_demo.mp3")
-)
+---
+
+## Full pipeline reference (plan → build → combine)
+
+```bash
+reng plan -o video_plan.json          # or --llm variant above
+reng build video_plan.json ./build_output
 ```
 
-## Outputs
+Build options: `--max-iterations N`, `--no-voiceover`, `--no-combine`, `--no-mix-audio` — see [README Usage](README.md#usage).
 
-The engine writes:
+---
 
-- `<project_dir>/out.mp4` — the final rendered video
-- `<project_dir>/out_frame01.png`, `out_frame02.png`, `out_frame03.png` — extracted keyframes from the last iteration (kept for debugging)
-- `<project_dir>/actN_voiceover.mp3` — per-act voiceover (if generated)
-- `<base_dir>/final.mp4` — combined video of all acts
-- `<base_dir>/final_voiceover.mp3` — combined narration of all acts
-- `<base_dir>/final_with_audio.mp4` — video with mixed voiceover
-- `~/.recursive-animation-engine/events.jsonl` — append-only event log for `reng watch`
+## One-shot render (single composition)
 
-## Environment variables
+```bash
+reng render ./path/to/hyperframes-project --intent "What must look correct in the final MP4"
+```
 
-| Variable | Required | Default | Purpose |
-|----------|----------|---------|---------|
-| `OPENROUTER_API_KEY` | yes* | — | OpenRouter API key |
-| `GEMINI_API_KEY` | yes* | — | Google Gemini API key (for TTS and vision) |
-| `FIREWORKS_API_KEY` | yes* | — | Fireworks AI API key |
-| `RENG_LLM_PROVIDER` | no | `openrouter` | Default provider: openrouter, gemini, fireworks, native |
-| `RENG_VISION_PROVIDER` | no | `openrouter` | Vision-specific provider |
-| `RENG_TEXT_PROVIDER` | no | `native` | Text generation provider (native uses Claude Code context) |
-| `RENG_VISION_MODEL` | no | `google/gemma-3-27b-it` | Vision model (Gemma series recommended) |
-| `RENG_TEXT_MODEL` | no | `claude-code-native` | Text model (or fallback to Gemma) |
-| `HYPERFRAMES_CLI` | no | *(auto: `node_modules/.bin/hyperframes`)* | Override: `hyperframes` binary or legacy `cli.js` |
-| `RENG_EVENT_LOG` | no | `~/.recursive-animation-engine/events.jsonl` | Event log path |
+Exit `0` = finished without hard error (check printed **status** for pass vs `max_iterations`). Exit `1` = render/vision error.
 
-*At least one provider key is required depending on which providers you use.
+---
 
-## Recommended Models
+## Supporting CLIs
 
-### Vision (default to Gemma series)
+| Task | Command |
+|------|---------|
+| Live log | `reng watch` / `reng watch --follow-run <id>` / `reng watch --since 1h` |
+| Single image | `reng vision <image> "<question>"` |
+| Keyframes only | `reng verify <video.mp4> --frames N` |
+| TTS | `reng voiceover "..." -o out.mp3` (Gemini; see README) |
+| Provider debug | `reng provider test` / `reng provider env` |
 
-| Model | Provider | Strengths |
-|-------|----------|-----------|
-| `google/gemma-3-27b-it` | OpenRouter | Default, great vision + text |
-| `google/gemma-3-12b-it` | OpenRouter | Faster, still capable |
-| `gemini-2.0-flash` | Gemini API | Native Google, good pricing |
+---
 
-### Text
+## Multi-provider LLM (short)
 
-| Provider | Model | Use case |
-|----------|-------|----------|
-| `native` | Claude Code | Default, uses your existing context |
-| OpenRouter | `anthropic/claude-sonnet-4` | High-quality reasoning |
-| OpenRouter | `google/gemma-3-27b-it` | Fallback, unified model |
+Default vision path uses **OpenRouter** + Gemma-class models unless overridden. Text defaults to **native** (Claude Code); set `RENG_TEXT_PROVIDER=openrouter` for CLI/API plan steps. **Full tables:** [Environment variables](README.md#environment-variables) and [Multi-Provider Configuration](README.md#multi-provider-configuration).
+
+---
+
+## Outputs (where files land)
+
+- `<project_dir>/out.mp4` — primary rendered file (Hyperframes + `-o` wiring)
+- `<project_dir>/out_frameNN.png` — keyframes from last iteration (debug)
+- Build pipeline: `final.mp4`, `final_with_audio.mp4`, etc. under build dir — see [README Usage](README.md#usage) / build phase docs.
+- Events: `~/.recursive-animation-engine/events.jsonl`
+
+---
 
 ## When environment errors block you
 
-If `reng render` or `reng build` fails with "not found" or a path error after **2 different attempts**:
+If `reng render` / `reng build` fails after **two** different attempts:
 
-1. **STOP** the fix loop.
-2. Run `which reng ffmpeg node chromium`, `npm install` at the engine repo root if needed, and `ls node_modules/.bin/hyperframes` (or `ls $HYPERFRAMES_CLI`) to gather evidence.
-3. **Report to the user** with the exact command, the exact error, and the file paths you can see.
-4. Do not silently retry — a broken shell is not a coding bug.
+1. **STOP** blind retries.
+2. Run `reng provider env`, `which reng ffmpeg node`, and from engine repo `ls node_modules/.bin/hyperframes` (or `ls "$HYPERFRAMES_CLI"`).
+3. **Report** exact command, stderr, and paths.
 
-## Available themes (Hyperframes compositions)
+---
 
-### 1. Soft Enterprise (default)
-- Professional, clean, modern
-- Warm cream backgrounds, rose-coral accents, muted text
-- IBM Plex Mono or similar functional sans-serif
-- Smooth 60fps transitions
+## Optional: Hyperframes visual themes
 
-### 2. Digital Craft (lo-fi tech)
-- Blends digital precision with a hand-crafted, analog feel
-- Tactile backgrounds (paper, linen, canvas)
-- Hand-drawn strokes (sketches, arrows, scribbles) in ink/charcoal/graphite
-- "On twos/threes" step-framing (8–12 fps) for stop-motion quality
-- "Boil" effect — subtle constant movement in static lines
-- Sketch-to-render transitions (wireframe morphs to polished UI)
+Soft Enterprise vs Digital Craft notes from product marketing can guide copy and motion tone; composition structure still follows Hyperframes HTML rules. Do not let theme prose override the user’s explicit brief.
 
-## Python API
+---
+
+## Python API (summary)
 
 ```python
-from reng import (
-    run,
-    VideoPlan, VideoAct, VideoConcept,
-    build_all_acts,
-    get_provider, get_tts_provider,
-    analyze
-)
-
-# Run basic recursive render
-result = run("./scene", intent="loading spinner", max_iterations=3)
-
-# Plan and build full video
+from reng.lib.engine import run
 from reng.lib.plan import reason_over_acts
 from reng.lib.build import build_all_acts
+from pathlib import Path
 
-answers = {
-    "purpose": "product demo",
-    "topic": "New feature walkthrough",
-    "duration": "medium",
-}
-plan = reason_over_acts(answers)
+# Recursive single project
+result = run("./video-workspaces/slug/acts/act01", intent="…", max_iterations=3)
 
-result = build_all_acts(plan, Path("./build_output"))
-print(f"Final video: {result.final_video}")
+# Plan + build all acts
+plan = reason_over_acts(answers, provider_name="openrouter")
+res = build_all_acts(plan, Path("./video-workspaces/slug/build_output"))
 ```
+
+Full exports: [README.md](README.md) / package `reng`.
+
+---
 
 ## Version
 
-reng 0.2.0
+reng 0.2.1
