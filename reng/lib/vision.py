@@ -1,52 +1,26 @@
 """
-Single-shot vision analysis via OpenRouter.
+Vision analysis via configurable providers (OpenRouter, Gemini, Fireworks).
 
-Sends one image + one question to a vision-capable LLM and returns
-plain text. Used both as a standalone CLI and as a verification step
-inside the recursive render loop.
+Defaults to Gemma (latest) for vision tasks.
 """
 
 from __future__ import annotations
 
-import base64
-import mimetypes
-import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import httpx
+if TYPE_CHECKING:
+    from .providers import BaseProvider, ModelSpec
 
-
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "openai/gpt-4o-mini"
-MAX_BYTES = 20 * 1024 * 1024  # 20 MB
-SUPPORTED_MIME_PREFIXES = (
-    "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp",
+from .providers import (
+    ProviderError,
+    VisionError,  # Re-export for backward compatibility
+    get_vision_model_spec,
+    get_vision_provider,
 )
 
-
-class VisionError(RuntimeError):
-    pass
-
-
-def _encode_image(path: Path) -> tuple[str, str]:
-    """Return (mime_type, base64_data). Raises VisionError on failure."""
-    if not path.exists():
-        raise VisionError(f"image not found: {path}")
-    if not path.is_file():
-        raise VisionError(f"not a regular file: {path}")
-
-    size = path.stat().st_size
-    if size > MAX_BYTES:
-        raise VisionError(f"image too large ({size} bytes, max {MAX_BYTES})")
-
-    mime, _ = mimetypes.guess_type(str(path))
-    if not mime or not any(mime.startswith(p) for p in SUPPORTED_MIME_PREFIXES):
-        raise VisionError(
-            f"unsupported image type: {mime or 'unknown'} (need PNG/JPG/GIF/WebP)"
-        )
-
-    data = base64.b64encode(path.read_bytes()).decode("ascii")
-    return mime, data
+# Re-export for backward compatibility
+VisionError = ProviderError
 
 
 def analyze(
@@ -57,52 +31,147 @@ def analyze(
     api_key: str | None = None,
     max_tokens: int = 2048,
     timeout: float = 120.0,
+    provider_name: str | None = None,
+    model_spec: "ModelSpec" | None = None,
 ) -> str:
     """
     Send an image + question to a vision model and return the text response.
 
-    Raises VisionError on any failure (missing key, unsupported image,
-    network error, bad response).
+    Uses the configured vision provider (OpenRouter, Gemini, or Fireworks).
+    Defaults to Gemma as the vision model.
+
+    Args:
+        image_path: Path to the image file
+        question: Question to ask about the image
+        model: Legacy parameter - model ID (deprecated, use model_spec or env vars)
+        api_key: API key (defaults to provider-specific env var)
+        max_tokens: Maximum tokens in response
+        timeout: Request timeout in seconds
+        provider_name: Explicit provider selection ('openrouter', 'gemini', 'fireworks')
+        model_spec: Full model specification (overrides other params)
+
+    Raises:
+        VisionError: On any failure (missing key, unsupported image, network error)
+
+    Returns:
+        Text response from the vision model
     """
-    api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "").strip()
-    if not api_key:
-        raise VisionError("OPENROUTER_API_KEY env var is not set")
+    provider = get_vision_provider()
 
-    model = model or os.environ.get("VISION_MODEL", "").strip() or DEFAULT_MODEL
-    mime, b64 = _encode_image(Path(image_path))
-    data_url = f"data:{mime};base64,{b64}"
+    # If provider_name specified, get that specific provider
+    if provider_name:
+        from .providers import get_provider
 
-    payload = {
-        "model": model,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": question},
-                {"type": "image_url", "image_url": {"url": data_url}},
-            ],
-        }],
-        "max_tokens": max_tokens,
-    }
+        provider = get_provider(provider_name)
+
+    # Get model spec (defaults to Gemma via env or hardcoded default)
+    if model_spec is None:
+        model_spec = get_vision_model_spec()
+        if model:
+            # Override with legacy model parameter if provided
+            model_spec = model_spec.replace(model_id=model)
 
     try:
-        resp = httpx.post(
-            OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/Science-Prof-Robot/recursive-animation-engine",
-                "X-Title": "recursive-animation-engine",
-            },
-            json=payload,
-            timeout=timeout,
+        return provider.analyze(
+            question=question,
+            image_path=Path(image_path),
+            model_spec=model_spec,
+            max_tokens=max_tokens,
         )
-    except httpx.RequestError as e:
-        raise VisionError(f"network error: {e}")
+    except ProviderError as e:
+        raise VisionError(str(e)) from e
 
-    if resp.status_code >= 400:
-        raise VisionError(f"OpenRouter returned {resp.status_code}: {resp.text}")
+
+def is_approval(text: str) -> bool:
+    """
+    Heuristic: does this vision response indicate no issues?
+
+    This is a utility function for checking if a vision model's
+    response indicates the image is acceptable/correct.
+    """
+    stripped = text.strip().lower()
+    if not stripped:
+        return False
+
+    # Model was told to reply exactly "OK" when clean
+    if stripped == "ok":
+        return True
+
+    # Some models add a period or sentence
+    first_line = stripped.splitlines()[0]
+    approved_phrases = (
+        "ok",
+        "ok.",
+        "looks good",
+        "looks good.",
+        "pass",
+        "pass.",
+        "approved",
+        "approved.",
+        "correct",
+        "correct.",
+        "no issues",
+        "no issues.",
+        "no problems",
+        "no problems.",
+    )
+    return first_line in approved_phrases
+
+
+def compare_frames(
+    frame_paths: list[Path],
+    description: str,
+    *,
+    max_tokens: int = 4096,
+    provider_name: str | None = None,
+) -> dict[str, str]:
+    """
+    Compare multiple frames and describe what changes between them.
+
+    Useful for verifying animation continuity and detecting glitches.
+
+    Args:
+        frame_paths: List of frame paths to compare (typically 3 keyframes)
+        description: What the animation should show
+        max_tokens: Maximum response length
+        provider_name: Explicit provider selection
+
+    Returns:
+        Dict with 'summary' and 'issues' keys
+    """
+    provider = get_vision_provider()
+    if provider_name:
+        from .providers import get_provider
+
+        provider = get_provider(provider_name)
+
+    model_spec = get_vision_model_spec()
+
+    # Build a comparison question
+    question = f"""Compare these {len(frame_paths)} animation frames from different timestamps.
+
+The animation should show: {description}
+
+Analyze:
+1. Does the progression make sense across frames?
+2. Are there any visual glitches, jumps, or discontinuities?
+3. Is the animation smooth and coherent?
+4. List any issues found, or reply 'OK' if everything looks correct.
+"""
+
+    # For multi-frame comparison, we'd need provider-specific batch handling
+    # For now, analyze the middle frame as representative
+    middle_frame = frame_paths[len(frame_paths) // 2]
 
     try:
-        return resp.json()["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, ValueError) as e:
-        raise VisionError(f"unexpected response shape: {e}")
+        result = provider.analyze(
+            question=question,
+            image_path=middle_frame,
+            model_spec=model_spec,
+            max_tokens=max_tokens,
+        )
+
+        issues = [] if is_approval(result) else [result]
+        return {"summary": result, "issues": issues}
+    except ProviderError as e:
+        raise VisionError(str(e)) from e

@@ -1,21 +1,34 @@
 # recursive-animation-engine
 
-An HTML → MP4 rendering pipeline with a built-in self-correction loop. Renders, extracts keyframes, asks a vision model "is this correct?", and iterates until it is — or reports what's still wrong.
+An HTML → MP4 rendering pipeline with built-in self-correction loops and multi-provider LLM support. Features structured video planning (plan → build → combine), Gemini TTS 3.1 Flash voiceover generation, and vision verification with multiple backends.
 
 ```
-HTML/CSS/JS  ─────►  MP4  ─────►  keyframes  ─────►  vision model
-     ▲                                                     │
-     └─────────  if anything is off, patch and retry  ─────┘
-                          (up to 3 loops)
+┌─────────────────────────────────────────────────────────────────────┐
+│                         PLAN PHASE                                  │
+│  User answers → LLM reasons over acts → Structured VideoPlan       │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                        BUILD PHASE                                  │
+│  For each act: Render → Verify keyframes → Vision check → Patch     │
+│  + Generate voiceover with Gemini TTS 3.1 Flash                     │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                        COMBINE PHASE                                │
+│  Stitch acts → Mix audio → Deliver final MP4                        │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-Always-on progress viewer lets you see exactly what the engine is doing in real time:
+Always-on progress viewer:
 
 ```
 $ reng watch
 reng watch — tailing ~/.recursive-animation-engine/events.jsonl
 
-14:02:01 a1b2c3 ▶ run start   ./renders/progress-bar  max=3
+14:02:01 a1b2c3 ▶ run start   ./build_output/act01  max=3
 14:02:01 a1b2c3 ■ iteration 1
 14:02:01 a1b2c3   render…
 14:02:08 a1b2c3   ✓ rendered out.mp4 (7.2s)
@@ -34,33 +47,15 @@ reng watch — tailing ~/.recursive-animation-engine/events.jsonl
 14:02:26 a1b2c3 ■ run passed (2 iter) → out.mp4
 ```
 
-## Why
+## Features
 
-Cheap text models (Kimi, GLM, Llama, open-source Gemini variants) write great HTML and CSS — but they're blind. They can't tell you if the progress bar actually animates, if text is clipping, if the chart labels landed in the right place. You end up either:
-
-1. Paying for a multimodal model on every single message (expensive), or
-2. Blindly shipping whatever was generated (buggy), or
-3. **Routing vision calls only into the verification loop** ← this engine
-
-Vision fires 3× per iteration (one per keyframe). A full successful run costs ~$0.003 with `gpt-4o-mini`. A 3-iteration worst-case is ~$0.01.
-
-## How it works
-
-Five components, one loop.
-
-| Component | What it does |
-|-----------|--------------|
-| **Render** | Shells out to the Hyperframes CLI → produces an MP4 from an HTML project directory |
-| **Verify** | `ffmpeg` extracts N keyframes from the interior 10%–90% of the video (avoids black fade frames) |
-| **Vision** | One `POST /chat/completions` per frame to OpenRouter with the image + a verification prompt |
-| **Engine** | Orchestrates render → verify → vision, emits events, decides when to stop |
-| **Watch** | Tails the shared event log and pretty-prints in real time |
-
-The loop terminates when:
-- Every keyframe comes back with `OK` from the vision model, **or**
-- `max_iterations` (default 3) is reached — ships the best version
-
-Between failed iterations, an optional `patch_fn` callback runs so an agent can edit the HTML/CSS before the next render.
+- **Multi-provider LLM support**: OpenRouter, Google Gemini API, Fireworks AI
+- **Default vision model**: Gemma 3 (latest) for cost-effective verification
+- **Structured planning**: Interactive plan phase with user questions → act-based reasoning
+- **Act-by-act building**: Build complex videos scene by scene with vision verification per act
+- **Gemini TTS 3.1 Flash**: Generate high-quality voiceovers with SSML support
+- **Native Claude Code integration**: Text generation uses Claude Code context by default
+- **Vision verification loops**: Render → extract keyframes → vision check → iterate
 
 ## Install
 
@@ -88,16 +83,83 @@ pip install -e .
 
 ### Environment variables
 
-| Variable | Required | Default |
-|----------|----------|---------|
-| `OPENROUTER_API_KEY` | yes | — |
-| `VISION_MODEL` | no | `openai/gpt-4o-mini` |
-| `HYPERFRAMES_CLI` | no | `~/hyperframes/packages/cli/dist/cli.js` |
-| `RENG_EVENT_LOG` | no | `~/.recursive-animation-engine/events.jsonl` |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | yes* | — | OpenRouter API key |
+| `GEMINI_API_KEY` | yes* | — | Google Gemini API key (for TTS and native Gemini) |
+| `FIREWORKS_API_KEY` | yes* | — | Fireworks AI API key |
+| `RENG_LLM_PROVIDER` | no | `openrouter` | Default provider: `openrouter`, `gemini`, `fireworks`, `native` |
+| `RENG_VISION_PROVIDER` | no | `openrouter` | Provider for vision tasks |
+| `RENG_TEXT_PROVIDER` | no | `native` | Text generation provider (`native` = Claude Code context) |
+| `RENG_VISION_MODEL` | no | `google/gemma-3-27b-it` | Vision model ID |
+| `HYPERFRAMES_CLI` | no | `~/hyperframes/...` | Path to Hyperframes CLI |
+| `RENG_EVENT_LOG` | no | `~/.recursive-animation-engine/events.jsonl` | Event log path |
+
+*At least one provider key is required depending on your setup.
 
 ## Usage
 
-### One-shot render
+### Full workflow: Plan → Build → Combine
+
+#### 1. Plan Phase
+
+Interactively create a structured video plan:
+
+```bash
+reng plan -o video_plan.json
+```
+
+This asks about:
+- Purpose and topic
+- Target duration (short/medium/long)
+- Visual style preferences
+- Voiceover requirements
+- Target audience
+
+Then reasons over your answers to produce acts with timing and scripts.
+
+#### 2. Build Phase
+
+Build each act with vision loop verification:
+
+```bash
+reng build video_plan.json ./build_output
+```
+
+This:
+- Creates act subdirectories (`act01/`, `act02/`, etc.)
+- Renders each act with recursive verification
+- Generates voiceover per act (if scripted)
+- Combines all acts into `final.mp4`
+- Mixes voiceover with video
+
+Options:
+- `--max-iterations N` - Max render-verify cycles per act (default: 3)
+- `--no-voiceover` - Skip TTS generation
+- `--no-combine` - Don't concatenate acts
+- `--no-mix-audio` - Don't mix voiceover with final video
+
+#### 3. Voiceover Only
+
+Generate voiceover with Gemini TTS 3.1 Flash:
+
+```bash
+# Simple text
+reng voiceover "Welcome to our product demo" -o intro.mp3
+
+# From script file
+reng voiceover --file script.txt -o narration.mp3
+
+# Custom voice and rate
+reng voiceover "Hello world" -o hello.mp3 --voice en-GB-Neural2-B --rate 0.9
+
+# SSML for fine-grained control
+reng voiceover '<speak>Hello <break time="1s"/> World</speak>' -o ssml.mp3
+```
+
+### Legacy: One-shot render
+
+For simple single-scene renders:
 
 ```bash
 reng render ./renders/progress-bar --intent "progress bar fills 0% → 100% smoothly"
@@ -106,86 +168,195 @@ reng render ./renders/progress-bar --intent "progress bar fills 0% → 100% smoo
 Exit code `0` = passed or hit max iterations (check `status` in output).
 Exit code `1` = render or vision errored.
 
-### Live progress viewer (always-on)
-
-Run this in a second terminal and leave it open:
+### Live progress viewer
 
 ```bash
+# Watch all activity
 reng watch
-```
 
-Filter to one run by ID:
-
-```bash
+# Follow specific run
 reng watch --follow-run a1b2c3d4
-```
 
-Replay the last hour of history, then tail forever:
-
-```bash
+# Replay last hour
 reng watch --since 1h
 ```
 
-### Standalone vision (no render)
+### Vision and verification
 
 ```bash
+# Vision check with default Gemma
 reng vision screenshot.png "What error is shown here?"
-```
 
-### Standalone keyframe extraction
+# Use specific provider
+reng vision screenshot.png "What do you see?" --provider gemini
 
-```bash
+# Specific model
+reng vision screenshot.png "Describe the layout" --model google/gemma-3-27b-it
+
+# Extract keyframes
 reng verify input.mp4 --frames 5
 ```
 
-### Programmatic (Python)
+### Provider management
 
-```python
-from reng.lib.engine import run
+```bash
+# Test all configured providers
+reng provider test
 
-def patch(result):
-    # result.issues contains vision's feedback per failed frame
-    # edit HTML/CSS files in the project dir based on those issues
-    for issue in result.issues:
-        apply_my_fix(result.iteration, issue)
+# List recommended models
+reng provider list-models
 
-outcome = run(
-    "./renders/progress-bar",
-    intent="progress bar fills 0% → 100% smoothly",
-    max_iterations=3,
-    patch_fn=patch,
-)
-
-print(outcome.status)        # "passed" | "max_iterations" | "error"
-print(outcome.final_video)   # Path to the final MP4
-for it in outcome.iterations:
-    print(it.iteration, it.passed, it.issues)
+# Show environment setup help
+reng provider env
 ```
 
-## Agent integration
+## Python API
 
-If you're wiring this into an agent framework (nanobot, autogen, langgraph, custom), drop `SKILL.md` into your agent's skill/tool definitions. It describes the engine, when to use it, and the CLI surface. The engine emits events to a shared log so your agent can also `tail -f` the log for real-time updates — no special IPC needed.
+### Full workflow
 
-## Swapping the renderer
+```python
+from reng.lib.plan import reason_over_acts, get_planning_questions
+from reng.lib.build import build_all_acts
+
+# Create plan from user answers
+answers = {
+    "purpose": "product demo",
+    "topic": "New feature walkthrough",
+    "duration": "medium",
+    "voiceover": "yes, formal",
+}
+plan = reason_over_acts(answers)
+
+# Build all acts with vision verification
+result = build_all_acts(
+    plan,
+    Path("./build_output"),
+    max_iterations=3,
+    generate_voiceovers=True,
+    combine_acts=True,
+)
+
+print(f"Status: {result.status}")
+print(f"Final video: {result.final_video}")
+print(f"Combined voiceover: {result.combined_voiceover}")
+```
+
+### Voiceover generation
+
+```python
+from reng.lib.providers import GeminiTTSProvider
+
+tts = GeminiTTSProvider()
+
+# Simple generation
+audio = tts.generate_voiceover(
+    text="Welcome to our presentation!",
+    voice_name="en-US-Neural2-D",
+    output_path=Path("welcome.mp3")
+)
+
+# SSML for control
+ssml = '''<speak>
+    <emphasis level="strong">Welcome!</emphasis>
+    <break time="500ms"/>
+    <prosody rate="slow" pitch="-1st">Let me show you around.</prosody>
+</speak>'''
+
+audio = tts.generate_voiceover_ssml(
+    ssml=ssml,
+    voice_name="en-US-Neural2-D",
+    output_path=Path("ssml_demo.mp3")
+)
+```
+
+### Custom provider usage
+
+```python
+from reng.lib.providers import get_provider, get_vision_model_spec
+
+# Use Gemini for vision
+provider = get_provider("gemini")
+model_spec = get_vision_model_spec()
+
+result = provider.analyze(
+    question="What do you see in this image?",
+    image_path=Path("frame.png"),
+    model_spec=model_spec
+)
+```
+
+## Multi-Provider Configuration
+
+### OpenRouter (default)
+Unified API for 100+ models.
+
+```bash
+export OPENROUTER_API_KEY='your-key'
+export RENG_LLM_PROVIDER=openrouter
+export RENG_VISION_MODEL=google/gemma-3-27b-it
+```
+
+### Google Gemini API
+Native Gemini with competitive pricing.
+
+```bash
+export GEMINI_API_KEY='your-key'
+export RENG_LLM_PROVIDER=gemini
+export RENG_VISION_MODEL=gemini-2.0-flash
+```
+
+### Fireworks AI
+Fast inference for production.
+
+```bash
+export FIREWORKS_API_KEY='your-key'
+export RENG_LLM_PROVIDER=fireworks
+```
+
+### Mix and match
+
+```bash
+# Use Gemini for vision, native Claude Code for text
+export RENG_VISION_PROVIDER=gemini
+export RENG_TEXT_PROVIDER=native
+
+# OpenRouter for both
+export RENG_LLM_PROVIDER=openrouter
+export RENG_VISION_MODEL=google/gemma-3-27b-it
+```
+
+## Recommended Models
+
+### Vision
+
+| Model | Provider | When |
+|-------|----------|------|
+| `google/gemma-3-27b-it` | OpenRouter | Default, excellent vision + text |
+| `google/gemma-3-12b-it` | OpenRouter | Faster, still capable |
+| `gemini-2.0-flash` | Gemini API | Native Google, good pricing |
+
+### Text
+
+| Provider | Model | Use case |
+|----------|-------|----------|
+| `native` | Claude Code | Default, uses existing context |
+| OpenRouter | `anthropic/claude-sonnet-4` | High-quality reasoning |
+| OpenRouter | `google/gemma-3-27b-it` | Unified vision+text |
+
+## Design Principles
+
+- **Flexible providers**: Use OpenRouter for unified access, Gemini for TTS/natives, Fireworks for speed
+- **Cost-effective verification**: Gemma provides excellent vision at lower cost than alternatives
+- **Native integration**: Text generation defaults to Claude Code context (no extra API calls)
+- **Structured workflow**: Plan phase structures complexity, build phase executes with verification
+- **Per-act verification**: Each scene verified independently before combination
+- **Deterministic keyframe sampling**: Always samples 10%–90% of duration to avoid fade frames
+- **Hard iteration caps**: Max 3 loops per act prevents runaway cost
+- **File-based event bus**: Append-only NDJSON log enables any number of watchers
+
+## Swapping the Renderer
 
 The engine is renderer-agnostic. `reng/lib/render.py` is a ~60-line shim around the Hyperframes CLI. To use Remotion, Manim, Playwright recording, etc., replace that module's `render()` function — the rest of the pipeline (verify, vision, loop, events) stays the same.
-
-## Recommended vision models
-
-| Model | When |
-|-------|------|
-| `openai/gpt-4o-mini` | Default; cheapest that's still good at general UI checks |
-| `openai/gpt-4o` | When verification quality matters more than $/run |
-| `anthropic/claude-sonnet-4-6` | Complex scenes, multi-element reasoning |
-| `google/gemini-2.0-flash` | Fastest; large context if you pass multiple frames later |
-
-## Design principles
-
-- **Cheap primary, expensive verification.** The engine doesn't care what wrote the HTML — use the cheapest model that's competent. Vision only pays off at verification time.
-- **Deterministic keyframe sampling.** Always samples 10%–90% of duration so we never verify a fade-in black frame as "broken".
-- **Hard iteration cap.** Max 3 loops. Prevents runaway cost when output is close-enough but never perfect.
-- **Explicit failure modes.** If the render binary is missing or the vision API errors, the engine stops and reports. No silent retries, no "spinning" illusion.
-- **File-based event bus.** Append-only NDJSON log means any number of watchers can observe without coupling to the engine. Works across processes, containers, SSH sessions.
 
 ## License
 

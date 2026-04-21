@@ -28,7 +28,7 @@ from typing import Callable
 from .events import EventLogger
 from .render import RenderError, render
 from .verify import VerifyError, extract_keyframes
-from .vision import VisionError, analyze
+from .vision import VisionError, analyze, is_approval
 
 
 DEFAULT_VERIFICATION_PROMPT = (
@@ -63,17 +63,6 @@ class RunResult:
 PatchFn = Callable[[IterationResult], None]
 
 
-def _is_approval(text: str) -> bool:
-    """Heuristic: does this vision response indicate no issues?"""
-    stripped = text.strip().lower()
-    if not stripped:
-        return False
-    # Model was told to reply exactly "OK" when clean.
-    if stripped == "ok":
-        return True
-    # Some models add a period or sentence.
-    first_line = stripped.splitlines()[0]
-    return first_line in ("ok", "ok.", "looks good", "looks good.")
 
 
 def run(
@@ -154,7 +143,7 @@ def run(
                     all_passed = False
                     continue
 
-                ok = _is_approval(text)
+                ok = is_approval(text)
                 if not ok:
                     result.issues.append(f"{frame.name}: {text}")
                     all_passed = False
