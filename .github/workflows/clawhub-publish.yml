@@ -3,12 +3,16 @@
 # Setup (once):
 # 1. Create a ClawHub account and generate an API/publish token (see OpenClaw docs for clawhub CLI).
 # 2. Add repository secret CLAWHUB_TOKEN (Settings → Secrets and variables → Actions).
-# 3. Run: Actions → "Publish to ClawHub" → Run workflow (set semver + changelog).
+# 3. Merges to `main` auto-publish a new patch version. Manual runs: Actions → "Publish to ClawHub".
+#
+# The clawhub CLI stores auth in a config file after `login --token`; CLAWHUB_TOKEN alone is not read for API calls.
 #
 # Alternatively publish from your machine: npm i -g clawhub && clawhub login && clawhub publish .
 name: Publish to ClawHub
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
@@ -22,17 +26,29 @@ on:
   release:
     types: [published]
 
+# One publish at a time; do not cancel an in-flight publish when another commit lands.
+concurrency:
+  group: clawhub-publish-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     # Avoid publishing from forks where secrets are unavailable anyway.
-    if: github.repository == 'Science-Prof-Robot/recursive-animation-engine'
+    # Skip the version-bump follow-up push (it uses [skip ci] and would not run workflows anyway).
+    if: >-
+      github.repository == 'Science-Prof-Robot/recursive-animation-engine' &&
+      !(github.event_name == 'push' && contains(github.event.head_commit.message, '[clawhub-sync]'))
 
     permissions:
-      contents: read
+      # Write is only used to push a SKILL.md version bump after a successful ClawHub publish on main.
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Persist credentials so the follow-up git push can use GITHUB_TOKEN.
+          persist-credentials: true
 
       - uses: actions/setup-node@v4
         with:
@@ -44,6 +60,9 @@ jobs:
       - name: Publish skill bundle to ClawHub
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+          # Some registry setups require the www host so auth headers survive redirects (see clawhub CLI issues).
+          CLAWHUB_REGISTRY: https://www.clawhub.ai
+          CLAWHUB_SITE: https://www.clawhub.ai
         shell: bash
         run: |
           set -euo pipefail
@@ -52,6 +71,9 @@ jobs:
             exit 1
           fi
 
+          # Non-interactive auth: the CLI does not use CLAWHUB_TOKEN from the environment for API calls until login writes config.
+          clawhub login --no-browser --token "${CLAWHUB_TOKEN}"
+
           if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
             TAG_NAME="${{ github.event.release.tag_name }}"
             VERSION="${TAG_NAME#v}"
@@ -59,6 +81,33 @@ jobs:
             if [ -z "${CHANGELOG_RAW}" ]; then
               CHANGELOG_RAW="Release ${TAG_NAME}"
             fi
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            # Next patch after the highest semver on main (remote may already include a post-publish SKILL bump).
+            git fetch origin main
+            read_version() {
+              grep -m1 '^version:' "$1" | sed 's/^version:[[:space:]]*//' | tr -d '\r'
+            }
+            BASE_LOCAL="$(read_version SKILL.md)"
+            BASE_REMOTE="$(git show origin/main:SKILL.md 2>/dev/null | grep -m1 '^version:' | sed 's/^version:[[:space:]]*//' | tr -d '\r' || true)"
+            if [[ ! "${BASE_LOCAL}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "SKILL.md: expected a top-level version: M.m.p semver line, got '${BASE_LOCAL}'"
+              exit 1
+            fi
+            if [[ -n "${BASE_REMOTE}" && "${BASE_REMOTE}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              BASE_VERSION="$(printf '%s\n%s' "${BASE_LOCAL}" "${BASE_REMOTE}" | sort -V | tail -n1)"
+            else
+              BASE_VERSION="${BASE_LOCAL}"
+            fi
+            if [[ ! "${BASE_VERSION}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "Could not resolve base semver (local=${BASE_LOCAL} remote=${BASE_REMOTE})"
+              exit 1
+            fi
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+            SHORT_SHA="${GITHUB_SHA:0:7}"
+            CHANGELOG_RAW="Auto-publish from main (${SHORT_SHA})"
           else
             VERSION="${{ github.event.inputs.version }}"
             CHANGELOG_RAW="${{ github.event.inputs.changelog }}"
@@ -73,3 +122,18 @@ jobs:
             --name "Recursive Animation Engine" \
             --version "${VERSION}" \
             --changelog "${CHANGELOG}"
+
+          # Keep SKILL.md in sync with the registry so the next main merge computes a new patch, not a duplicate semver.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            export PUBLISHED_VERSION="${VERSION}"
+            perl -i -pe 'if(/^version:\s*/ && !$seen){$_="version: $ENV{PUBLISHED_VERSION}\n"; $seen=1}' SKILL.md
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add SKILL.md
+            if git diff --staged --quiet; then
+              echo "SKILL.md already at ${VERSION}; nothing to commit."
+            else
+              git commit -m "chore: sync SKILL.md version to ${VERSION} after ClawHub publish [clawhub-sync] [skip ci]"
+              git push
+            fi
+          fi
