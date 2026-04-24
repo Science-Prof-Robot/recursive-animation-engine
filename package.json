@@ -2,6 +2,11 @@
   "name": "recursive-animation-engine-tooling",
   "private": true,
   "description": "Installs the Hyperframes CLI next to this repo so `reng` can render without a manual clone.",
+  "homepage": "https://github.com/Science-Prof-Robot/recursive-animation-engine",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Science-Prof-Robot/recursive-animation-engine.git"
+  },
   "engines": {
     "node": ">=22"
   },

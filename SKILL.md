@@ -9,6 +9,32 @@ description: >-
   Do not build unrelated web apps, dashboards, or deployable sites unless the user
   explicitly asks. Do not run hyperframes preview or reng render/build until the user
   confirmed the brief/plan or opted into autopilot (“go ahead”, “just render”).
+version: 0.2.1
+metadata:
+  openclaw:
+    # Declares every env var the bundled `reng` code reads so ClawHub / OpenClaw
+    # security analysis matches registry metadata (avoids “undeclared credential” flags).
+    # Most keys are optional at runtime; configure the subset for your chosen providers.
+    requires:
+      env:
+        - OPENROUTER_API_KEY
+        - GEMINI_API_KEY
+        - FIREWORKS_API_KEY
+        - RENG_LLM_PROVIDER
+        - RENG_VISION_PROVIDER
+        - RENG_TEXT_PROVIDER
+        - RENG_VISION_MODEL
+        - RENG_TEXT_MODEL
+        - RENG_VISION_MODEL_PROVIDER
+        - RENG_TEXT_MODEL_PROVIDER
+        - HYPERFRAMES_CLI
+        - RENG_EVENT_LOG
+        - NO_COLOR
+      bins:
+        - ffmpeg
+        - node
+    primaryEnv: OPENROUTER_API_KEY
+    homepage: https://github.com/Science-Prof-Robot/recursive-animation-engine
 ---
 
 # Recursive Animation Engine (agent skill)
@@ -43,6 +69,16 @@ flowchart LR
 - **Still images only** → use `reng vision` alone if a single frame check is enough
 - **Text-only** deliverables (no MP4 / no composition)
 - **Generic web apps** (SPAs, dashboards, deployable sites) — **out of scope** unless the user **explicitly** asks for that *in addition* to video
+
+---
+
+## Privacy & external services (required disclosure)
+
+This skill’s **verification loop** extracts **keyframes (images)** from rendered video and sends them to a **vision-capable model** via the configured provider (`RENG_VISION_PROVIDER` / `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, etc.). **Do not run** `reng render`, `reng build`, or `reng vision` until the **user has explicitly agreed** that frames or stills may be uploaded to that third-party API.
+
+**Voiceover** (`reng voiceover`) sends script text to **Google Gemini / Cloud TTS** endpoints when `GEMINI_API_KEY` is set. Obtain the same **explicit consent** before generating audio.
+
+If the user declines external vision or TTS, offer **non-uploading** work: edit HTML only, run `reng verify` locally without calling `reng vision`, or stop after Hyperframes render without the recursive loop.
 
 ---
 
