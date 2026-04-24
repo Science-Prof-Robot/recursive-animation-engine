@@ -1,0 +1,75 @@
+# Publishes this repository as an OpenClaw skill (SKILL.md at repo root) to https://clawhub.ai
+#
+# Setup (once):
+# 1. Create a ClawHub account and generate an API/publish token (see OpenClaw docs for clawhub CLI).
+# 2. Add repository secret CLAWHUB_TOKEN (Settings → Secrets and variables → Actions).
+# 3. Run: Actions → "Publish to ClawHub" → Run workflow (set semver + changelog).
+#
+# Alternatively publish from your machine: npm i -g clawhub && clawhub login && clawhub publish .
+name: Publish to ClawHub
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver to publish (bump when SKILL.md or skill bundle changes)"
+        required: true
+        default: "0.2.1"
+      changelog:
+        description: "Short changelog for this version"
+        required: false
+        default: "Update from repository"
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Avoid publishing from forks where secrets are unavailable anyway.
+    if: github.repository == 'Science-Prof-Robot/recursive-animation-engine'
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install ClawHub CLI
+        run: npm install -g clawhub
+
+      - name: Publish skill bundle to ClawHub
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CLAWHUB_TOKEN:-}" ]; then
+            echo "Missing Actions secret CLAWHUB_TOKEN. Add it under Settings → Secrets and variables → Actions, then re-run."
+            exit 1
+          fi
+
+          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+            TAG_NAME="${{ github.event.release.tag_name }}"
+            VERSION="${TAG_NAME#v}"
+            CHANGELOG_RAW="${{ github.event.release.body }}"
+            if [ -z "${CHANGELOG_RAW}" ]; then
+              CHANGELOG_RAW="Release ${TAG_NAME}"
+            fi
+          else
+            VERSION="${{ github.event.inputs.version }}"
+            CHANGELOG_RAW="${{ github.event.inputs.changelog }}"
+          fi
+
+          # ClawHub expects a short single-line changelog for the CLI.
+          CHANGELOG="$(printf '%s' "${CHANGELOG_RAW}" | tr '\r\n' '  ' | sed 's/  */ /g' | cut -c1-2000)"
+
+          clawhub whoami
+          clawhub publish "${GITHUB_WORKSPACE}" \
+            --slug recursive-animation-engine \
+            --name "Recursive Animation Engine" \
+            --version "${VERSION}" \
+            --changelog "${CHANGELOG}"
